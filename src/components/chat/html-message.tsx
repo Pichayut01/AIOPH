@@ -51,7 +51,14 @@ export function HtmlMessage({ html, isStreaming = false }: HtmlMessageProps) {
         const renderCodeBlock = (text: string, lang?: string) => {
           // Guard: if marked mistakenly treated indented AIOPH component HTML as code,
           // return it as raw HTML instead of rendering a code block.
-          if (text.includes('class="aioph-') || text.includes("class='aioph-")) {
+          if (
+            text.includes('class="aioph-') ||
+            text.includes("class='aioph-") ||
+            text.includes('class="research-') ||
+            text.includes("class='research-") ||
+            text.includes('class="step-') ||
+            text.includes("class='step-")
+          ) {
             return text;
           }
 
