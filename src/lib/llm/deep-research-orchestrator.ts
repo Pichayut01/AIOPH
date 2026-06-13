@@ -15,31 +15,35 @@ function cleanMessagesForLlm(messages: ChatMessage[]): ChatMessage[] {
   return messages.map(msg => {
     if (typeof msg.content === "string") {
       const trimmed = msg.content.trim();
+      let textContent = trimmed;
       if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
         try {
           const parsed = JSON.parse(trimmed);
           if (Array.isArray(parsed)) {
-            const textContent = (parsed as ContentPart[])
+            textContent = (parsed as ContentPart[])
               .filter(part => part.type === "text" && part.text)
               .map(part => part.text)
               .join("\n");
-            return {
-              role: msg.role,
-              content: textContent
-            };
           }
         } catch {}
       }
-      return msg;
+      // Strip details thinking blocks
+      const cleanedContent = textContent.replace(/<details class="thinking-block[\s\S]*?<\/details>/g, "");
+      return {
+        role: msg.role,
+        content: cleanedContent
+      };
     }
     if (Array.isArray(msg.content)) {
       const textContent = msg.content
         .filter(part => part.type === "text" && part.text)
         .map(part => part.text)
         .join("\n");
+      // Strip details thinking blocks
+      const cleanedContent = textContent.replace(/<details class="thinking-block[\s\S]*?<\/details>/g, "");
       return {
         role: msg.role,
-        content: textContent
+        content: cleanedContent
       };
     }
     return msg;
@@ -72,7 +76,7 @@ async function callLmStudio(
         messages,
         temperature,
         stream: false,
-        max_tokens: 4096
+        max_tokens: 16384
       })
     },
     Math.max(applicationConfiguration.lmStudioRequestTimeoutMs, 180000)
@@ -162,7 +166,7 @@ Example:
         } catch {
           // Fallback: use the user's latest query directly
           queries = [latestUserText];
-          sendUpdate(`<div class="step-data">⚠️ Failed to parse search plan JSON. Falling back to original query.</div>`);
+          sendUpdate(`<div class="step-data"> Failed to parse search plan JSON. Falling back to original query.</div>`);
         }
 
         sendUpdate(`<div class="step-data">Planned queries: ${queries.map(q => `<code>"${q}"</code>`).join(", ")}</div></div></div>`);
@@ -186,14 +190,14 @@ Example:
             if (processedQueries.has(query)) continue;
             processedQueries.add(query);
 
-            sendUpdate(`<div class="step-log-item">🔍 Searching <code>"${query}"</code>... `);
+            sendUpdate(`<div class="step-log-item"> Searching <code>"${query}"</code>... `);
             const searchResult = await searchWebForEvidence(query);
             const docCount = searchResult.documents.length;
             sendUpdate(`Found <strong>${docCount}</strong> documents.</div>`);
 
             if (docCount === 0) continue;
 
-            sendUpdate(`<div class="step-log-item">📄 Reading and summarizing details for <code>"${query}"</code>... `);
+            sendUpdate(`<div class="step-log-item"> Reading and summarizing details for <code>"${query}"</code>... `);
 
             // Compile document texts
             const docsText = searchResult.documents
@@ -206,7 +210,7 @@ Extract and summarize the key facts, findings, statistics, and detailed answers 
 Format your summary in clear bullet points. Include references to [Doc X] where applicable.
 
 Documents:
-${docsText.slice(0, 12000)}`;
+${docsText.slice(0, 24000)}`;
 
             const reasonerMessages: ChatMessage[] = [
               { role: "system", content: "You summarize information into detailed bullet points based only on provided source documents." },
@@ -218,7 +222,7 @@ ${docsText.slice(0, 12000)}`;
               reasonings.push(`### Summary for query "${query}":\n${summary}`);
               sendUpdate(`Done.</div>`);
             } catch (err) {
-              sendUpdate(`⚠️ Reasoner failed: ${err instanceof Error ? err.message : String(err)}</div>`);
+              sendUpdate(` Reasoner failed: ${err instanceof Error ? err.message : String(err)}</div>`);
             }
           }
 
@@ -236,11 +240,7 @@ Determine if we have enough detailed information to write a comprehensive report
 
 User Query: "${latestUserText}"
 Research Findings So Far:
-${findings.slice(0, 8000)}
-
-If we have enough information, output: "COMPLETE"
-If we need more info, output a JSON array containing 1 to 2 new follow-up search queries.
-Output ONLY "COMPLETE" or the JSON array. No preamble, no explainers.`;
+${findings.slice(0, 20000)}`;
 
             const checkerMessages: ChatMessage[] = [
               { role: "system", content: "Output either \"COMPLETE\" or a raw JSON array of strings." },
@@ -255,7 +255,7 @@ Output ONLY "COMPLETE" or the JSON array. No preamble, no explainers.`;
             }
 
             if (checkResult.includes("COMPLETE")) {
-              sendUpdate(`<div class="step-data">✅ Sufficiency Check: Complete! Proceeding to aggregate report.</div></div></div>`);
+              sendUpdate(`<div class="step-data"> Sufficiency Check: Complete! Proceeding to aggregate report.</div></div></div>`);
               break;
             } else {
               let newQueries: string[] = [];
@@ -270,10 +270,10 @@ Output ONLY "COMPLETE" or the JSON array. No preamble, no explainers.`;
                 newQueries = JSON.parse(cleanedCheck) as string[];
                 if (Array.isArray(newQueries) && newQueries.length > 0) {
                   queries = newQueries.filter(q => !processedQueries.has(q));
-                  sendUpdate(`<div class="step-data">🔄 Gaps identified. Follow-up queries: ${queries.map(q => `<code>"${q}"</code>`).join(", ")}</div></div></div>`);
+                  sendUpdate(`<div class="step-data"> Gaps identified. Follow-up queries: ${queries.map(q => `<code>"${q}"</code>`).join(", ")}</div></div></div>`);
                 }
               } catch {
-                sendUpdate(`<div class="step-data">✅ Sufficiency Check: Complete (Failed to parse gap queries).</div></div></div>`);
+                sendUpdate(`<div class="step-data"> Sufficiency Check: Complete (Failed to parse gap queries).</div></div></div>`);
                 break;
               }
             }
@@ -299,69 +299,101 @@ Structure the report logically, include a summary/overview, deep dive sections, 
 
         const cleanedUserMessages = cleanMessagesForLlm(userMessages);
 
-        const lmResponse = await fetchWithTimeout(
-          createLmStudioUrl("chat/completions"),
-          {
-            method: "POST",
-            headers: {
-              Accept: "text/event-stream",
-              "Content-Type": "application/json"
+        let currentMessages = [
+          { role: "system", content: aggregatorSystemPrompt },
+          ...cleanedUserMessages.slice(0, -1), // include history if any, using cleaned messages
+          { role: "user", content: aggregatorPrompt }
+        ];
+
+        let continueLoop = true;
+        let continuationLoopCount = 0;
+        const maxContinuationLoops = 3;
+
+        while (continueLoop && continuationLoopCount < maxContinuationLoops) {
+          continuationLoopCount++;
+
+          const lmResponse = await fetchWithTimeout(
+            createLmStudioUrl("chat/completions"),
+            {
+              method: "POST",
+              headers: {
+                Accept: "text/event-stream",
+                "Content-Type": "application/json"
+              },
+              body: JSON.stringify({
+                model,
+                messages: currentMessages,
+                temperature: temperature,
+                stream: true,
+                max_tokens: 16384
+              })
             },
-            body: JSON.stringify({
-              model,
-              messages: [
-                { role: "system", content: aggregatorSystemPrompt },
-                ...cleanedUserMessages.slice(0, -1), // include history if any, using cleaned messages
-                { role: "user", content: aggregatorPrompt }
-              ],
-              temperature: temperature,
-              stream: true,
-              max_tokens: 4096
-            })
-          },
-          Math.max(applicationConfiguration.lmStudioRequestTimeoutMs, 180000)
-        );
+            Math.max(applicationConfiguration.lmStudioRequestTimeoutMs, 180000)
+          );
 
-        if (!lmResponse.ok || !lmResponse.body) {
-          throw new Error(`Aggregator stream failed: ${lmResponse.status}`);
-        }
-
-        const reader = lmResponse.body.getReader();
-        const decoder = new TextDecoder();
-        let lineBuffer = "";
-
-        function getDeltaText(line: string): string {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("data:")) return "";
-          const payload = trimmed.replace(/^data:\s*/, "");
-          if (payload === "[DONE]") return "";
-          try {
-            const parsed = JSON.parse(payload) as {
-              choices?: Array<{
-                delta?: {
-                  content?: string;
-                };
-              }>;
-            };
-            return parsed.choices?.[0]?.delta?.content ?? "";
-          } catch {
-            return "";
+          if (!lmResponse.ok || !lmResponse.body) {
+            throw new Error(`Aggregator stream failed: ${lmResponse.status}`);
           }
-        }
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          lineBuffer += decoder.decode(value, { stream: true });
+          const reader = lmResponse.body.getReader();
+          const decoder = new TextDecoder();
+          let lineBuffer = "";
+          let finishReason = "";
+          let generatedDeltaText = "";
 
-          let newlineIndex;
-          while ((newlineIndex = lineBuffer.indexOf("\n")) !== -1) {
-            const rawLine = lineBuffer.slice(0, newlineIndex).replace(/\r$/, "");
-            lineBuffer = lineBuffer.slice(newlineIndex + 1);
-            const text = getDeltaText(rawLine);
-            if (text) {
-              controller.enqueue(encoder.encode(text));
+          function getDeltaTextAndReason(line: string): { content: string; finishReason?: string } {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) return { content: "" };
+            const payload = trimmed.replace(/^data:\s*/, "");
+            if (payload === "[DONE]") return { content: "" };
+            try {
+              const parsed = JSON.parse(payload) as {
+                choices?: Array<{
+                  delta?: {
+                    content?: string;
+                  };
+                  finish_reason?: string | null;
+                }>;
+              };
+              const choice = parsed.choices?.[0];
+              return {
+                content: choice?.delta?.content ?? "",
+                finishReason: choice?.finish_reason ?? undefined
+              };
+            } catch {
+              return { content: "" };
             }
+          }
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            lineBuffer += decoder.decode(value, { stream: true });
+
+            let newlineIndex;
+            while ((newlineIndex = lineBuffer.indexOf("\n")) !== -1) {
+              const rawLine = lineBuffer.slice(0, newlineIndex).replace(/\r$/, "");
+              lineBuffer = lineBuffer.slice(newlineIndex + 1);
+              const { content, finishReason: reason } = getDeltaTextAndReason(rawLine);
+              if (content) {
+                generatedDeltaText += content;
+                controller.enqueue(encoder.encode(content));
+              }
+              if (reason) {
+                finishReason = reason;
+              }
+            }
+          }
+
+          // If the model truncated due to max length limit, trigger auto-continuation
+          if (finishReason === "length") {
+            currentMessages = [
+              ...currentMessages,
+              { role: "assistant", content: generatedDeltaText },
+              { role: "user", content: "Continue writing the report exactly from where you left off. Do not repeat anything you have already written, and do not wrap in code blocks. Start directly with the next word or sentence." }
+            ];
+          } else {
+            continueLoop = false;
           }
         }
 

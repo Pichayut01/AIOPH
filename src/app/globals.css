@@ -2299,8 +2299,8 @@ input.field:focus {
 }
 
 .deep-research-toggle.active {
-  color: #a78bfa;
-  border-color: rgba(167, 139, 250, 0.4);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.4);
   background: rgba(167, 139, 250, 0.08);
   box-shadow: 0 0 12px rgba(167, 139, 250, 0.15);
 }
