@@ -1,7 +1,50 @@
 import { searchWebForEvidence } from "@/lib/search/search-service";
 import { fetchWithTimeout } from "@/lib/http/fetch-with-timeout";
 import { applicationConfiguration } from "@/lib/config/environment";
-import type { ChatMessage } from "@/lib/chat/message-types";
+import type { ChatMessage, ContentPart } from "@/lib/chat/message-types";
+
+const PLANNER_SVG = `<svg class="step-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path></svg>`;
+
+const SEARCH_SVG = `<svg class="step-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`;
+
+const CHECK_SVG = `<svg class="step-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>`;
+
+const WRITE_SVG = `<svg class="step-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`;
+
+function cleanMessagesForLlm(messages: ChatMessage[]): ChatMessage[] {
+  return messages.map(msg => {
+    if (typeof msg.content === "string") {
+      const trimmed = msg.content.trim();
+      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            const textContent = (parsed as ContentPart[])
+              .filter(part => part.type === "text" && part.text)
+              .map(part => part.text)
+              .join("\n");
+            return {
+              role: msg.role,
+              content: textContent
+            };
+          }
+        } catch {}
+      }
+      return msg;
+    }
+    if (Array.isArray(msg.content)) {
+      const textContent = msg.content
+        .filter(part => part.type === "text" && part.text)
+        .map(part => part.text)
+        .join("\n");
+      return {
+        role: msg.role,
+        content: textContent
+      };
+    }
+    return msg;
+  });
+}
 
 function createLmStudioUrl(pathname: string): URL {
   const base = applicationConfiguration.lmStudioBaseUrl.endsWith("/")
@@ -28,7 +71,8 @@ async function callLmStudio(
         model,
         messages,
         temperature,
-        stream: false
+        stream: false,
+        max_tokens: 4096
       })
     },
     Math.max(applicationConfiguration.lmStudioRequestTimeoutMs, 180000)
@@ -76,7 +120,7 @@ export function runDeepResearchOrchestrator(
       try {
         // --- Step 1: Planner ---
         sendUpdate(`<details class="thinking-block open" open><summary>Deep Research Progress</summary><div class="research-progress-container">`);
-        sendUpdate(`<div class="research-step"><div class="step-indicator"><span class="step-icon">📋</span></div><div class="step-details"><div class="step-title">Step 1: Planner</div><div class="step-status">Analyzing query and planning search topics...</div>`);
+        sendUpdate(`<div class="research-step"><div class="step-indicator"><span class="step-icon">${PLANNER_SVG}</span></div><div class="step-details"><div class="step-title">Step 1: Planner</div><div class="step-status">Analyzing query and planning search topics...</div>`);
 
         const plannerPrompt = `You are the Planner agent in an advanced autonomous Deep Research system.
 Your task is to analyze the user's query and formulate a search strategy.
@@ -131,7 +175,7 @@ Example:
 
         while (queries.length > 0 && loopCount < maxLoops) {
           loopCount++;
-          sendUpdate(`<div class="research-step"><div class="step-indicator"><span class="step-icon">🔍</span></div><div class="step-details"><div class="step-title">Step 2: Search & Retrieval (Iteration ${loopCount}/${maxLoops})</div><div class="step-status">Searching sources and analyzing contents...</div><div class="step-logs">`);
+          sendUpdate(`<div class="research-step"><div class="step-indicator"><span class="step-icon">${SEARCH_SVG}</span></div><div class="step-details"><div class="step-title">Step 2: Search & Retrieval (Iteration ${loopCount}/${maxLoops})</div><div class="step-status">Searching sources and analyzing contents...</div><div class="step-logs">`);
           
           const currentQueries = [...queries];
           queries = []; // reset for next loop
@@ -185,7 +229,7 @@ ${docsText.slice(0, 12000)}`;
 
           // Check if complete (if not last loop)
           if (loopCount < maxLoops) {
-            sendUpdate(`<div class="research-step"><div class="step-indicator"><span class="step-icon">📋</span></div><div class="step-details"><div class="step-title">Information Check</div><div class="step-status">Evaluating if gathered info is sufficient...</div>`);
+            sendUpdate(`<div class="research-step"><div class="step-indicator"><span class="step-icon">${CHECK_SVG}</span></div><div class="step-details"><div class="step-title">Information Check</div><div class="step-status">Evaluating if gathered info is sufficient...</div>`);
             const checkerPrompt = `You are the Planner agent in a Deep Research system.
 Analyze the user's request and the research findings gathered so far.
 Determine if we have enough detailed information to write a comprehensive report.
@@ -236,7 +280,7 @@ Output ONLY "COMPLETE" or the JSON array. No preamble, no explainers.`;
           }
         }
 
-        sendUpdate(`<div class="research-step"><div class="step-indicator"><span class="step-icon">✍️</span></div><div class="step-details"><div class="step-title">Step 4: Final Aggregator</div><div class="step-status">Compiling final report and references...</div></div></div></div></details>\n\n`);
+        sendUpdate(`<div class="research-step"><div class="step-indicator"><span class="step-icon">${WRITE_SVG}</span></div><div class="step-details"><div class="step-title">Step 4: Final Aggregator</div><div class="step-status">Compiling final report and references...</div></div></div></div></details>\n\n`);
 
         // --- Step 4: Final Aggregator ---
         const aggregatorSystemPrompt = `You are the Final Aggregator agent in an advanced Deep Research system.
@@ -253,6 +297,8 @@ ${findings}
 
 Structure the report logically, include a summary/overview, deep dive sections, facts, statistics, and references. Do not include markdown code block wraps (like \`\`\`markdown) for the final response.`;
 
+        const cleanedUserMessages = cleanMessagesForLlm(userMessages);
+
         const lmResponse = await fetchWithTimeout(
           createLmStudioUrl("chat/completions"),
           {
@@ -265,11 +311,12 @@ Structure the report logically, include a summary/overview, deep dive sections, 
               model,
               messages: [
                 { role: "system", content: aggregatorSystemPrompt },
-                ...userMessages.slice(0, -1), // include history if any
+                ...cleanedUserMessages.slice(0, -1), // include history if any, using cleaned messages
                 { role: "user", content: aggregatorPrompt }
               ],
               temperature: temperature,
-              stream: true
+              stream: true,
+              max_tokens: 4096
             })
           },
           Math.max(applicationConfiguration.lmStudioRequestTimeoutMs, 180000)
