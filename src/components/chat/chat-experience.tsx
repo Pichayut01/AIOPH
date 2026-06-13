@@ -304,6 +304,7 @@ export function ChatExperience() {
   const [isWaitingForFirstChunk, setIsWaitingForFirstChunk] = useState(false);
   const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
+  const [deepResearchMode, setDeepResearchMode] = useState(false);
 
   // Settings state
   const [selectedModel, setSelectedModel] = useState("");
@@ -591,7 +592,8 @@ export function ChatExperience() {
           messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
           model: selectedModel || undefined,
           temperature,
-          searchMode
+          searchMode,
+          deepResearch: deepResearchMode
         })
       });
 
@@ -952,7 +954,18 @@ export function ChatExperience() {
                 <Send size={14} />
               </button>
             </form>
-            <span className="composer-hint">Enter to send · Shift+Enter for new line</span>
+            <div className="composer-toolbar">
+              <button
+                type="button"
+                className={`deep-research-toggle${deepResearchMode ? " active" : ""}`}
+                onClick={() => setDeepResearchMode(!deepResearchMode)}
+                disabled={isSending}
+              >
+                <Sparkles size={12} className={deepResearchMode ? "enhancing-icon" : ""} />
+                <span>Deep Research</span>
+              </button>
+              <span className="composer-hint">Enter to send · Shift+Enter for new line</span>
+            </div>
           </div>
         </div>
       </div>
@@ -1007,14 +1020,24 @@ export function ChatExperience() {
               <Globe size={13} style={{ marginRight: 6, flexShrink: 0 }} />
               INTERNET
             </div>
-            <div className="segmented-control" role="group" aria-label="Search mode">
+            <div className={`segmented-control${deepResearchMode ? " disabled" : ""}`} role="group" aria-label="Search mode">
               {(["auto", "on", "off"] as SearchMode[]).map((mode) => (
-                <button key={mode} type="button" className={searchMode === mode ? "active" : ""} onClick={() => setSearchMode(mode)}>
+                <button
+                  key={mode}
+                  type="button"
+                  className={searchMode === mode ? "active" : ""}
+                  onClick={() => !deepResearchMode && setSearchMode(mode)}
+                  disabled={deepResearchMode}
+                >
                   {mode.toUpperCase()}
                 </button>
               ))}
             </div>
-            <p className="microcopy">Auto searches when questions mention current events.</p>
+            {deepResearchMode ? (
+              <p className="microcopy" style={{ color: "var(--color-text-muted)" }}>Deep Research handles searches automatically.</p>
+            ) : (
+              <p className="microcopy">Auto searches when questions mention current events.</p>
+            )}
           </section>
 
           <div className="drawer-actions">

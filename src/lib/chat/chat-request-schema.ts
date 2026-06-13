@@ -28,7 +28,8 @@ export const chatRequestSchema = z.object({
     .max(40),
   model: z.string().trim().max(180).optional(),
   temperature: z.number().min(0).max(2).optional(),
-  searchMode: z.enum(["auto", "on", "off"]).optional()
+  searchMode: z.enum(["auto", "on", "off"]).optional(),
+  deepResearch: z.boolean().optional()
 });
 
 export type ParsedChatRequestBody = z.infer<typeof chatRequestSchema>;

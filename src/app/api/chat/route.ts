@@ -2,6 +2,7 @@ import { applicationConfiguration } from "@/lib/config/environment";
 import { chatRequestSchema } from "@/lib/chat/chat-request-schema";
 import { createHtmlErrorResponse } from "@/lib/chat/html-error";
 import type { ChatMessage, ContentPart, SearchMode } from "@/lib/chat/message-types";
+import { runDeepResearchOrchestrator } from "@/lib/llm/deep-research-orchestrator";
 import {
   createLmStudioChatCompletionResponse,
   createTextStreamFromLmStudioResponse,
@@ -114,6 +115,44 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Unable to resolve an LM Studio model.";
     return createHtmlErrorResponse("LM Studio model unavailable", errorMessage, 503);
+  }
+
+  if (parsedRequest.data.deepResearch) {
+    const rawMessages = parsedRequest.data.messages.slice(-6);
+    const processedMessages = rawMessages.map((message) => {
+      if (typeof message.content === "string") {
+        const trimmed = message.content.trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) {
+              return {
+                role: message.role,
+                content: parsed as ContentPart[]
+              };
+            }
+          } catch {}
+        }
+      }
+      return message;
+    }) as ChatMessage[];
+
+    const drStream = runDeepResearchOrchestrator(
+      processedMessages,
+      latestUserMessage,
+      model,
+      parsedRequest.data.temperature ?? 0.2
+    );
+
+    const responseHeaders = new Headers({
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-AIOPH-Search-Used": "true",
+    });
+
+    return new Response(drStream, {
+      headers: responseHeaders
+    });
   }
 
   // ── Pass 1: Enhance the latest user prompt ──

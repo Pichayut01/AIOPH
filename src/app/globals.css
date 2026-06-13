@@ -2264,4 +2264,56 @@ input.field:focus {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ----------------------------------------------------------
+   Deep Research Toggle UI Styles
+   ---------------------------------------------------------- */
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding: 0 4px;
+}
+
+.deep-research-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 20px;
+  padding: 6px 12px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+
+.deep-research-toggle:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-hover);
+  background: var(--color-surface-3);
+}
+
+.deep-research-toggle.active {
+  color: #a78bfa;
+  border-color: rgba(167, 139, 250, 0.4);
+  background: rgba(167, 139, 250, 0.08);
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.15);
+}
+
+.deep-research-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Disabled styling for segmented control */
+.segmented-control.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
 
