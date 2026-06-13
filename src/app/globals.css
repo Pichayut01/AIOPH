@@ -2316,4 +2316,147 @@ input.field:focus {
   pointer-events: none;
 }
 
+/* ----------------------------------------------------------
+   Deep Research Progress UI Styles
+   ---------------------------------------------------------- */
+
+.research-progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin: 12px 0;
+  box-shadow: inset 0 0 16px rgba(167, 139, 250, 0.01);
+  animation: fade-in 300ms ease-out;
+}
+
+.research-step {
+  display: flex;
+  gap: 14px;
+  opacity: 0.65;
+  transition: opacity 300ms ease;
+  position: relative;
+}
+
+.research-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 32px;
+  bottom: -18px;
+  width: 2px;
+  background: var(--color-border-subtle);
+}
+
+/* The last step is active and glowing */
+.research-progress-container .research-step:last-child {
+  opacity: 1;
+}
+
+.research-progress-container .research-step:last-child .step-indicator {
+  background: rgba(167, 139, 250, 0.12);
+  border-color: #a78bfa;
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.3);
+}
+
+.research-progress-container .research-step:last-child .step-title {
+  color: #a78bfa;
+}
+
+/* Preceding steps are completed/green */
+.research-progress-container .research-step:not(:last-child) .step-indicator {
+  background: rgba(34, 197, 94, 0.08);
+  border-color: #22c55e;
+}
+
+.step-indicator {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--color-surface-3);
+  border: 2px solid var(--color-border-subtle);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  z-index: 2;
+  transition: all 300ms ease;
+}
+
+.step-icon {
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.step-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+  flex-grow: 1;
+}
+
+.step-title {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  transition: color 250ms ease;
+}
+
+.step-status {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.step-data {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  box-shadow: var(--shadow-sm);
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.step-data code {
+  background: var(--color-surface-3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #f472b6;
+  font-size: 10px;
+}
+
+.step-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(167, 139, 250, 0.15);
+}
+
+.step-log-item {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.4;
+}
+
+.step-log-item code {
+  background: var(--color-surface-1);
+  padding: 1px 4px;
+  border-radius: 3px;
+  color: #a78bfa;
+}
+
 

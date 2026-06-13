@@ -75,8 +75,14 @@ export function runDeepResearchOrchestrator(
 
       try {
         // --- Step 1: Planner ---
-        sendUpdate(`<details class="thinking-block open" open><summary>Deep Research Progress</summary><div class="thinking-content">`);
-        sendUpdate(`📋 <strong>Step 1: Planner</strong> - Analyzing query and creating search plan...<br/>`);
+        sendUpdate(`<details class="thinking-block open" open><summary>Deep Research Progress</summary><div class="research-progress-container">`);
+        sendUpdate(`
+    <div class="research-step">
+      <div class="step-indicator"><span class="step-icon">📋</span></div>
+      <div class="step-details">
+        <div class="step-title">Step 1: Planner</div>
+        <div class="step-status">Analyzing query and planning search topics...</div>
+        `);
 
         const plannerPrompt = `You are the Planner agent in an advanced autonomous Deep Research system.
 Your task is to analyze the user's query and formulate a search strategy.
@@ -118,10 +124,18 @@ Example:
         } catch {
           // Fallback: use the user's latest query directly
           queries = [latestUserText];
-          sendUpdate(`⚠️ Failed to parse search plan JSON. Falling back to original query.<br/>`);
+          sendUpdate(`
+        <div class="step-data">⚠️ Failed to parse search plan JSON. Falling back to original query.</div>
+          `);
         }
 
-        sendUpdate(`Planned queries: ${queries.map(q => `<code>"${q}"</code>`).join(", ")}<br/><br/>`);
+        sendUpdate(`
+        <div class="step-data">
+          Planned queries: ${queries.map(q => `<code>"${q}"</code>`).join(", ")}
+        </div>
+      </div>
+    </div>
+        `);
 
         // --- Step 2 & 3: Search & Reason Loop (Max 2 loops) ---
         let findings = "";
@@ -131,7 +145,14 @@ Example:
 
         while (queries.length > 0 && loopCount < maxLoops) {
           loopCount++;
-          sendUpdate(`🔍 <strong>Step 2: Search & Retrieval (Iteration ${loopCount}/${maxLoops})</strong> - Running searches...<br/>`);
+          sendUpdate(`
+    <div class="research-step">
+      <div class="step-indicator"><span class="step-icon">🔍</span></div>
+      <div class="step-details">
+        <div class="step-title">Step 2: Search & Retrieval (Iteration ${loopCount}/${maxLoops})</div>
+        <div class="step-status">Searching sources and analyzing contents...</div>
+        <div class="step-logs">
+          `);
           
           const currentQueries = [...queries];
           queries = []; // reset for next loop
@@ -142,14 +163,14 @@ Example:
             if (processedQueries.has(query)) continue;
             processedQueries.add(query);
 
-            sendUpdate(`  • Searching for <code>"${query}"</code>... `);
+            sendUpdate(`<div class="step-log-item">🔍 Searching <code>"${query}"</code>... `);
             const searchResult = await searchWebForEvidence(query);
             const docCount = searchResult.documents.length;
-            sendUpdate(`Found ${docCount} documents.<br/>`);
+            sendUpdate(`Found <strong>${docCount}</strong> documents.</div>`);
 
             if (docCount === 0) continue;
 
-            sendUpdate(`📄 <strong>Step 3: Scraper & Reasoner</strong> - Summarizing contents for <code>"${query}"</code>...<br/>`);
+            sendUpdate(`<div class="step-log-item">📄 Reading and summarizing details for <code>"${query}"</code>... `);
 
             // Compile document texts
             const docsText = searchResult.documents
@@ -172,17 +193,30 @@ ${docsText.slice(0, 12000)}`;
             try {
               const summary = await callLmStudio(reasonerMessages, model, 0.2);
               reasonings.push(`### Summary for query "${query}":\n${summary}`);
+              sendUpdate(`Done.</div>`);
             } catch (err) {
-              sendUpdate(`  ⚠️ Reasoner failed for query "${query}": ${err instanceof Error ? err.message : String(err)}<br/>`);
+              sendUpdate(`⚠️ Reasoner failed: ${err instanceof Error ? err.message : String(err)}</div>`);
             }
           }
 
           // Accumulate findings
           findings += (findings ? "\n\n" : "") + reasonings.join("\n\n");
 
+          sendUpdate(`
+        </div>
+      </div>
+    </div>
+          `);
+
           // Check if complete (if not last loop)
           if (loopCount < maxLoops) {
-            sendUpdate(`<br/>📋 <strong>Evaluating if gathered information is sufficient...</strong><br/>`);
+            sendUpdate(`
+    <div class="research-step">
+      <div class="step-indicator"><span class="step-icon">📋</span></div>
+      <div class="step-details">
+        <div class="step-title">Information Check</div>
+        <div class="step-status">Evaluating if gathered info is sufficient...</div>
+            `);
             const checkerPrompt = `You are the Planner agent in a Deep Research system.
 Analyze the user's request and the research findings gathered so far.
 Determine if we have enough detailed information to write a comprehensive report.
@@ -208,7 +242,11 @@ Output ONLY "COMPLETE" or the JSON array. No preamble, no explainers.`;
             }
 
             if (checkResult.includes("COMPLETE")) {
-              sendUpdate(`✅ Information gathered successfully.<br/>`);
+              sendUpdate(`
+        <div class="step-data">✅ Sufficiency Check: Complete! Proceeding to aggregate report.</div>
+      </div>
+    </div>
+              `);
               break;
             } else {
               let newQueries: string[] = [];
@@ -223,18 +261,34 @@ Output ONLY "COMPLETE" or the JSON array. No preamble, no explainers.`;
                 newQueries = JSON.parse(cleanedCheck) as string[];
                 if (Array.isArray(newQueries) && newQueries.length > 0) {
                   queries = newQueries.filter(q => !processedQueries.has(q));
-                  sendUpdate(`🔄 Follow-up queries generated: ${queries.map(q => `<code>"${q}"</code>`).join(", ")}<br/>`);
+                  sendUpdate(`
+        <div class="step-data">🔄 Gaps identified. Follow-up queries: ${queries.map(q => `<code>"${q}"</code>`).join(", ")}</div>
+      </div>
+    </div>
+                  `);
                 }
               } catch {
-                sendUpdate(`✅ Failed to parse follow-up queries. Ending research loop.<br/>`);
+                sendUpdate(`
+        <div class="step-data">✅ Sufficiency Check: Complete (Failed to parse gap queries).</div>
+      </div>
+    </div>
+                `);
                 break;
               }
             }
           }
         }
 
-        sendUpdate(`<br/>✍️ <strong>Step 4: Final Aggregator</strong> - Compiling report and formatting...<br/>`);
-        sendUpdate(`</div></details>\n\n`);
+        sendUpdate(`
+    <div class="research-step">
+      <div class="step-indicator"><span class="step-icon">✍️</span></div>
+      <div class="step-details">
+        <div class="step-title">Step 4: Final Aggregator</div>
+        <div class="step-status">Compiling final report and references...</div>
+      </div>
+    </div>
+  </div>
+</details>\n\n`);
 
         // --- Step 4: Final Aggregator ---
         const aggregatorSystemPrompt = `You are the Final Aggregator agent in an advanced Deep Research system.
