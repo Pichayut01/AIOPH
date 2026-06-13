@@ -107,32 +107,3 @@ export async function searchWebForEvidence(query: string): Promise<SearchEvidenc
   };
 }
 
-export function shouldUseInternetSearch(message: string, searchMode: "auto" | "on" | "off"): boolean {
-  if (searchMode === "on") {
-    return true;
-  }
-
-  if (searchMode === "off") {
-    return false;
-  }
-
-  const normalizedMessage = message.toLowerCase();
-  return [
-    "search",
-    "internet",
-    "web",
-    "latest",
-    "current",
-    "today",
-    "news",
-    "price",
-    "ค้นหา",
-    "อินเทอร์เน็ต",
-    "เว็บ",
-    "ล่าสุด",
-    "วันนี้",
-    "ตอนนี้",
-    "ราคา",
-    "ข่าว"
-  ].some((signal) => normalizedMessage.includes(signal));
-}

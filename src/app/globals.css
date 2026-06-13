@@ -468,7 +468,7 @@ ul, ol {
 
 /* --- User Bubble --- */
 .user-message {
-  max-width: 70%;
+  max-width: 100%;
   background: var(--color-surface-3);
   border: 1px solid var(--color-border-subtle);
   border-radius: 16px 16px 4px 16px;

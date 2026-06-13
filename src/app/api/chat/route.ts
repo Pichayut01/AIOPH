@@ -10,7 +10,8 @@ import {
 } from "@/lib/llm/lm-studio-client";
 import { buildHtmlAssistantSystemPrompt } from "@/lib/llm/system-prompt";
 import { enhanceUserPrompt } from "@/lib/llm/prompt-enhancer";
-import { searchWebForEvidence, shouldUseInternetSearch } from "@/lib/search/search-service";
+import { generateSmartSearchQuery } from "@/lib/llm/smart-search-planner";
+import { searchWebForEvidence } from "@/lib/search/search-service";
 import type { SearchEvidence } from "@/lib/search/search-types";
 
 export const runtime = "nodejs";
@@ -102,12 +103,6 @@ export async function POST(request: Request): Promise<Response> {
 
   const latestUserMessage = getLatestUserMessage(parsedRequest.data.messages);
   const searchMode: SearchMode = parsedRequest.data.searchMode ?? "auto";
-  const shouldSearch = shouldUseInternetSearch(latestUserMessage, searchMode);
-  let searchEvidence: SearchEvidence | undefined;
-
-  if (shouldSearch) {
-    searchEvidence = await searchWebForEvidence(latestUserMessage);
-  }
 
   let model: string;
   try {
@@ -155,9 +150,27 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  // ── Pass 1: Enhance the latest user prompt ──
-  const { enhancedPrompt, thinking: enhancedThinking } = await enhanceUserPrompt(latestUserMessage, model);
+  // ── Parallel Pass: Enhance prompt & Generate Smart Search Query ──
+  const searchPromise = (searchMode === "auto" || searchMode === "on") 
+    ? generateSmartSearchQuery(latestUserMessage, model)
+    : Promise.resolve(null);
+  
+  const enhancePromise = enhanceUserPrompt(latestUserMessage, model);
+
+  const [searchQuery, { enhancedPrompt, thinking: enhancedThinking }] = await Promise.all([
+    searchPromise,
+    enhancePromise
+  ]);
+
   const wasPromptEnhanced = enhancedPrompt !== latestUserMessage;
+  let searchEvidence: SearchEvidence | undefined;
+
+  // For "on" mode, fallback to original message if LLM generated null
+  const finalSearchQuery = searchQuery || (searchMode === "on" ? latestUserMessage : null);
+  
+  if (finalSearchQuery) {
+    searchEvidence = await searchWebForEvidence(finalSearchQuery);
+  }
 
   // Build the messages array, replacing the last user message with the enhanced version
   const rawMessages = parsedRequest.data.messages.slice(-6);
@@ -245,7 +258,7 @@ export async function POST(request: Request): Promise<Response> {
     const responseHeaders = new Headers({
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
-      "X-AIOPH-Search-Used": shouldSearch ? "true" : "false",
+      "X-AIOPH-Search-Used": searchEvidence ? "true" : "false",
       "X-AIOPH-Search-Sources": createSearchMetadataHeader(searchEvidence),
       "X-AIOPH-Prompt-Enhanced": wasPromptEnhanced ? "true" : "false",
       "X-AIOPH-Enhanced-Prompt": wasPromptEnhanced ? encodeTextHeader(enhancedPrompt) : "",
