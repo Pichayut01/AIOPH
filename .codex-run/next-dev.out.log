@@ -1,0 +1,113 @@
+
+> aioph-html-web-agent@0.1.0 dev
+> next dev --hostname 127.0.0.1 --port 3000
+
+   ▲ Next.js 15.5.19
+   - Local:        http://127.0.0.1:3000
+   - Network:      http://127.0.0.1:3000
+
+ ✓ Starting...
+ ✓ Ready in 1719ms
+ ○ Compiling / ...
+ ✓ Compiled / in 3.2s (625 modules)
+ GET / 200 in 3619ms
+ GET / 200 in 97ms
+ ○ Compiling /api/models ...
+ ✓ Compiled /api/models in 872ms (636 modules)
+ GET /api/models 200 in 1016ms
+ GET /api/health 200 in 1022ms
+ GET / 200 in 241ms
+ GET /api/health 200 in 30ms
+ GET /api/models 200 in 43ms
+ ○ Compiling /api/chat ...
+ ✓ Compiled /api/chat in 2.8s (912 modules)
+ POST /api/chat 503 in 3031ms
+ POST /api/chat 503 in 16ms
+ POST /api/chat 503 in 13ms
+ POST /api/chat 503 in 12ms
+ POST /api/chat 200 in 1762ms
+ GET / 200 in 158ms
+ GET /api/health 200 in 30ms
+ GET /api/models 200 in 39ms
+ POST /api/chat 502 in 14ms
+ POST /api/chat 502 in 2315ms
+ POST /api/chat 502 in 2366ms
+ GET / 200 in 60ms
+ POST /api/chat 503 in 12ms
+   Reload env: .env.local
+ ✓ Compiled in 2.7s (910 modules)
+ GET / 200 in 129ms
+ GET / 200 in 143ms
+ ✓ Compiled /api/models in 163ms (674 modules)
+ ✓ Compiled (676 modules)
+ GET /api/models 200 in 392ms
+ GET /api/health 200 in 395ms
+ GET /api/health 200 in 11ms
+ GET /api/models 200 in 17ms
+ GET /api/health 200 in 10ms
+ GET /api/models 200 in 17ms
+ GET /api/health 200 in 12ms
+ GET /api/models 200 in 18ms
+ GET /api/health 200 in 12ms
+ GET /api/models 200 in 18ms
+ POST /api/chat 502 in 138ms
+ GET /api/health 200 in 10ms
+ GET /api/models 200 in 14ms
+ POST /api/chat 502 in 12ms
+ POST /api/chat 200 in 4789ms
+ POST /api/chat 200 in 31898ms
+ POST /api/chat 200 in 1383ms
+ POST /api/chat 200 in 1843ms
+ GET /api/health 200 in 15ms
+ GET /api/models 200 in 10ms
+ GET / 200 in 188ms
+ GET /api/health 200 in 22ms
+ GET /api/models 200 in 30ms
+ POST /api/chat 200 in 40449ms
+ POST /api/chat 200 in 2639ms
+ GET / 200 in 79ms
+ GET /api/health 200 in 33ms
+ GET /api/models 200 in 38ms
+ POST /api/chat 200 in 2633ms
+ GET /api/health 200 in 35ms
+ GET /api/models 200 in 38ms
+ GET /api/health 200 in 14ms
+ GET /api/models 200 in 24ms
+ POST /api/chat 200 in 17657ms
+ POST /api/chat 200 in 2789ms
+ ✓ Compiled in 229ms (660 modules)
+ ✓ Compiled in 1ms (660 modules)
+ ✓ Compiled in 0ms (660 modules)
+ ✓ Compiled in 0ms (660 modules)
+ GET / 200 in 643ms
+DATA_LINE: {"error":{"message":"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5314>= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input."},"message":"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5314>= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input."}
+ POST /api/chat 200 in 2449ms
+DATA_LINE: {"error":{"message":"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5312>= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input."},"message":"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5312>= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input."}
+ POST /api/chat 200 in 3186ms
+ ✓ Compiled in 401ms (660 modules)
+ GET / 200 in 63ms
+LM STUDIO HEADERS: Headers {
+  'x-powered-by': 'Express',
+  'content-type': 'text/event-stream',
+  'cache-control': 'no-cache',
+  connection: 'keep-alive',
+  date: 'Tue, 09 Jun 2026 18:03:29 GMT',
+  'transfer-encoding': 'chunked'
+}
+DATA_LINE: {"error":{"message":"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5312>= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input."},"message":"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5312>= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input."}
+ POST /api/chat 200 in 3244ms
+ ✓ Compiled in 137ms (660 modules)
+ GET / 200 in 76ms
+ ✓ Compiled in 157ms (660 modules)
+ GET / 200 in 50ms
+LM STUDIO HEADERS: Headers {
+  'x-powered-by': 'Express',
+  'content-type': 'text/event-stream',
+  'cache-control': 'no-cache',
+  connection: 'keep-alive',
+  date: 'Tue, 09 Jun 2026 18:03:54 GMT',
+  'transfer-encoding': 'chunked'
+}
+DATA_LINE: {"error":{"message":"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5312>= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input."},"message":"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 5312>= n_ctx: 4096). Try to load the model with a larger context length, or provide a shorter input."}
+ POST /api/chat 200 in 2133ms
+ ✓ Compiled in 291ms (376 modules)

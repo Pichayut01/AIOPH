@@ -1,0 +1,16 @@
+.particles-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none; /* Let clicks pass through to the chat */
+}
+
+/* Make sure the canvas fills the container */
+.particles-container canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}

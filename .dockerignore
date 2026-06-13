@@ -1,0 +1,12 @@
+node_modules
+.next
+.env
+.env.local
+.git
+npm-debug.log*
+README.md
+DESIGN.md
+aura-system-01-DESIGN.md
+production_blueprint.md
+agent.md
+html-chatbot-implementation-plan.md
