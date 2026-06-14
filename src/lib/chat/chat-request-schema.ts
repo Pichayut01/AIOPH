@@ -10,6 +10,22 @@ const contentPartSchema = z.union([
     image_url: z.object({
       url: z.string()
     })
+  }),
+  z.object({
+    type: z.literal("file"),
+    file: z.object({
+      name: z.string(),
+      size: z.number(),
+      content: z.string()
+    })
+  }),
+  z.object({
+    type: z.literal("link"),
+    link: z.object({
+      url: z.string(),
+      title: z.string(),
+      content: z.string()
+    })
   })
 ]);
 

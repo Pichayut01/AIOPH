@@ -9,13 +9,16 @@ import {
   Check,
   Download,
   ExternalLink,
+  File as FileIcon,
   Globe,
+  Image as ImageIcon,
   MessageSquare,
   Plus,
   RefreshCw,
   Send,
   Settings,
   Sparkles,
+  Square,
   Trash2,
   WifiOff,
   X
@@ -26,7 +29,7 @@ import { HtmlStreamBuffer } from "@/lib/html/html-stream-buffer";
 import { HtmlMessage } from "@/components/chat/html-message";
 import { DotMatrixLoader } from "@/components/chat/dot-matrix-loader";
 import { safeCopyToClipboard } from "@/lib/utils/clipboard";
-import type { SearchMode } from "@/lib/chat/message-types";
+import type { SearchMode, ContentPart } from "@/lib/chat/message-types";
 
 // ── Types ──
 
@@ -75,6 +78,18 @@ interface HealthPayload {
     resultsLimit: number;
     pageFetchLimit: number;
   };
+}
+
+interface AttachedFile {
+  name: string;
+  size: number;
+  content: string;
+}
+
+interface AttachedLink {
+  url: string;
+  title: string;
+  content: string;
 }
 
 interface ConversationSummary {
@@ -270,27 +285,107 @@ function EnhancedPromptBadge({ enhancedPrompt, thinking }: { enhancedPrompt: str
   );
 }
 
-function parseUserMessageContent(content: string): { text: string; imageUrls: string[] } {
+function parseUserMessageContent(content: string): {
+  text: string;
+  imageUrls: string[];
+  files: AttachedFile[];
+  links: AttachedLink[];
+} {
   if (content.startsWith("[") && content.endsWith("]")) {
     try {
       const parsed = JSON.parse(content);
       if (Array.isArray(parsed)) {
         let text = "";
         const imageUrls: string[] = [];
+        const files: AttachedFile[] = [];
+        const links: AttachedLink[] = [];
         for (const part of parsed) {
-          if (part.type === "text") {
+          if (part.type === "text" && part.text) {
             text += part.text;
-          } else if (part.type === "image_url") {
+          } else if (part.type === "image_url" && part.image_url) {
             imageUrls.push(part.image_url.url);
+          } else if (part.type === "file" && part.file) {
+            files.push(part.file);
+          } else if (part.type === "link" && part.link) {
+            links.push(part.link);
           }
         }
-        return { text, imageUrls };
+        return { text, imageUrls, files, links };
       }
     } catch {
       // ignore
     }
   }
-  return { text: content, imageUrls: [] };
+  return { text: content, imageUrls: [], files: [], links: [] };
+}
+
+function UserFileCard({ file }: { file: AttachedFile }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
+  return (
+    <div className="user-file-card">
+      <div className="user-file-card-header">
+        <div className="user-file-card-info">
+          <FileIcon size={14} className="user-file-card-icon" />
+          <span className="user-file-card-name" title={file.name}>{file.name}</span>
+          <span className="user-file-card-size">({formatBytes(file.size)})</span>
+        </div>
+        <button
+          type="button"
+          className="user-file-card-toggle"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          {isExpanded ? "Hide Content" : "View Content"}
+        </button>
+      </div>
+      {isExpanded && (
+        <div className="user-file-card-body">
+          <pre><code>{file.content}</code></pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserLinkCard({ link }: { link: AttachedLink }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  return (
+    <div className="user-link-card">
+      <div className="user-link-card-header">
+        <div className="user-link-card-info">
+          <Globe size={14} className="user-link-card-icon" />
+          <div className="user-link-card-text-container">
+            <span className="user-link-card-title" title={link.title}>{link.title}</span>
+            <a href={link.url} target="_blank" rel="noopener noreferrer" className="user-link-card-url">
+              {link.url}
+              <ExternalLink size={10} style={{ display: "inline", marginLeft: 4, verticalAlign: "middle" }} />
+            </a>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="user-link-card-toggle"
+          onClick={() => setIsExpanded(!isExpanded)}
+        >
+          {isExpanded ? "Hide Text" : "View Scraped Text"}
+        </button>
+      </div>
+      {isExpanded && (
+        <div className="user-link-card-body">
+          <pre><code>{link.content}</code></pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Main Component ──
@@ -322,12 +417,44 @@ export function ChatExperience() {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
+  // Prompt Queue and Stop Ref
+  const [promptQueue, setPromptQueue] = useState<Array<{
+    prompt: string;
+    images: string[];
+    files: AttachedFile[];
+    links: AttachedLink[];
+  }>>([]);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Attachment states
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const [attachedLinks, setAttachedLinks] = useState<AttachedLink[]>([]);
+  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false);
+  const [isLinkInputOpen, setIsLinkInputOpen] = useState(false);
+  const [linkInputUrl, setLinkInputUrl] = useState("");
+  const [isScrapingLink, setIsScrapingLink] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isHistoryMounted = useRef(false);
   const chatBodyRef = useRef<HTMLDivElement>(null);
   const isRestoringScrollRef = useRef(false);
+
+  const activeConversationIdRef = useRef<string | null>(null);
+
+  // Synchronize activeConversationId with localStorage and Ref
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+    if (typeof window !== "undefined") {
+      if (activeConversationId) {
+        localStorage.setItem("aioph_active_conversation_id", activeConversationId);
+      } else {
+        localStorage.removeItem("aioph_active_conversation_id");
+      }
+    }
+  }, [activeConversationId]);
 
   const isAtWelcomeState = messages.length === 0;
   const isConnected = health?.lmStudio.ok ?? false;
@@ -419,7 +546,7 @@ export function ChatExperience() {
         setActiveConversationId(id);
 
         if (typeof window !== "undefined") {
-          sessionStorage.setItem("aioph_active_conversation_id", id);
+          localStorage.setItem("aioph_active_conversation_id", id);
         }
 
         if (typeof window !== "undefined" && window.innerWidth < 768) {
@@ -429,7 +556,7 @@ export function ChatExperience() {
         // Restore scroll position after React DOM update
         setTimeout(() => {
           if (typeof window !== "undefined") {
-            const savedScroll = sessionStorage.getItem(`aioph_scroll_${id}`);
+            const savedScroll = localStorage.getItem(`aioph_scroll_${id}`);
             const el = chatBodyRef.current;
             if (restoreScroll && savedScroll !== null && el) {
               el.scrollTop = Number(savedScroll);
@@ -482,12 +609,12 @@ export function ChatExperience() {
         setActiveConversationId(null);
         setMessages([]);
         if (typeof window !== "undefined") {
-          sessionStorage.removeItem("aioph_active_conversation_id");
-          sessionStorage.removeItem(`aioph_scroll_${id}`);
+          localStorage.removeItem("aioph_active_conversation_id");
+          localStorage.removeItem(`aioph_scroll_${id}`);
         }
       } else {
         if (typeof window !== "undefined") {
-          sessionStorage.removeItem(`aioph_scroll_${id}`);
+          localStorage.removeItem(`aioph_scroll_${id}`);
         }
       }
       void loadConversations();
@@ -533,34 +660,159 @@ export function ChatExperience() {
   // Load saved session conversation on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const savedActiveId = sessionStorage.getItem("aioph_active_conversation_id");
+      const savedActiveId = localStorage.getItem("aioph_active_conversation_id");
       if (savedActiveId) {
         void loadConversation(savedActiveId, true);
       }
     }
   }, [loadConversation]);
 
+  const handleFileUpload = (files: FileList | null) => {
+    if (!files) return;
+    Array.from(files).forEach((file) => {
+      if (file.size > 500 * 1024) {
+        alert(`File ${file.name} is too large. Max size is 500KB.`);
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target?.result;
+        if (typeof text === "string") {
+          // Detect binary files (presence of null bytes or control characters)
+          const isBinary = /[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 1000));
+          if (isBinary) {
+            alert(`File ${file.name} appears to be binary. Only text files are supported.`);
+            return;
+          }
+          setAttachedFiles((prev) => [...prev, { name: file.name, size: file.size, content: text }]);
+        }
+      };
+      reader.readAsText(file);
+    });
+  };
+
+  const handleLinkSubmit = async () => {
+    const url = linkInputUrl.trim();
+    if (!url) return;
+    
+    // Add protocol if missing
+    let targetUrl = url;
+    if (!/^https?:\/\//i.test(url)) {
+      targetUrl = "https://" + url;
+    }
+
+    setIsScrapingLink(true);
+    try {
+      const res = await fetch("/api/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: targetUrl })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setAttachedLinks((prev) => [...prev, { url: targetUrl, title: data.title || targetUrl, content: data.text }]);
+        setLinkInputUrl("");
+        setIsLinkInputOpen(false);
+      } else {
+        alert(data.error || "Failed to parse the link.");
+      }
+    } catch {
+      alert("Error scraping the website. Please check the URL and try again.");
+    } finally {
+      setIsScrapingLink(false);
+    }
+  };
+
+  const removeAttachedFile = (index: number) => {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const removeAttachedLink = (index: number) => {
+    setAttachedLinks((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const stopGeneration = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+  }, []);
+
+  const removeQueuedPrompt = useCallback((index: number) => {
+    setPromptQueue((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
   // ── Send message ──
 
-  async function sendMessage(promptOverride?: string): Promise<void> {
+  async function sendMessage(
+    promptOverride?: string,
+    imagesOverride?: string[],
+    filesOverride?: AttachedFile[],
+    linksOverride?: AttachedLink[]
+  ): Promise<void> {
     const prompt = (promptOverride ?? inputValue).trim();
-    const hasImages = attachedImages.length > 0;
-    if ((!prompt && !hasImages) || isSending) return;
+    const currentImages = imagesOverride ?? attachedImages;
+    const currentFiles = filesOverride ?? attachedFiles;
+    const currentLinks = linksOverride ?? attachedLinks;
+    const hasImages = currentImages.length > 0;
+    const hasFiles = currentFiles.length > 0;
+    const hasLinks = currentLinks.length > 0;
+
+    if ((!prompt && !hasImages && !hasFiles && !hasLinks) || (isSending && !promptOverride)) {
+      if (isSending && !promptOverride) {
+        // Append to prompt queue with attachments
+        setPromptQueue((prev) => [...prev, {
+          prompt,
+          images: attachedImages,
+          files: attachedFiles,
+          links: attachedLinks
+        }]);
+        setInputValue("");
+        setAttachedImages([]);
+        setAttachedFiles([]);
+        setAttachedLinks([]);
+        if (textareaRef.current) textareaRef.current.style.height = "auto";
+      }
+      return;
+    }
 
     // Create conversation if none active
     let convId = activeConversationId;
     if (!convId) {
-      const firstLine = prompt || "Sent an image";
+      const firstLine = prompt || "Sent an attachment";
       convId = await createNewConversation(truncateTitle(firstLine));
       if (!convId) return;
     }
 
     let userMessageContent = prompt;
-    if (hasImages) {
-      const parts = [
-        { type: "text", text: prompt },
-        ...attachedImages.map((img) => ({ type: "image_url", image_url: { url: img } }))
+    if (hasImages || hasFiles || hasLinks) {
+      const parts: ContentPart[] = [
+        { type: "text", text: prompt }
       ];
+      currentImages.forEach((img) => {
+        parts.push({ type: "image_url", image_url: { url: img } });
+      });
+      currentFiles.forEach((file) => {
+        parts.push({
+          type: "file",
+          file: {
+            name: file.name,
+            size: file.size,
+            content: file.content
+          }
+        });
+      });
+      currentLinks.forEach((link) => {
+        parts.push({
+          type: "link",
+          link: {
+            url: link.url,
+            title: link.title,
+            content: link.content
+          }
+        });
+      });
       userMessageContent = JSON.stringify(parts);
     }
 
@@ -573,8 +825,12 @@ export function ChatExperience() {
     const nextMessages = [...messages, userMessage];
 
     setMessages(nextMessages);
-    setInputValue("");
-    setAttachedImages([]);
+    if (!promptOverride) {
+      setInputValue("");
+      setAttachedImages([]);
+      setAttachedFiles([]);
+      setAttachedLinks([]);
+    }
     setIsSending(true);
     setIsEnhancingPrompt(true);
     setIsWaitingForFirstChunk(true);
@@ -584,10 +840,23 @@ export function ChatExperience() {
     // Save user message to DB
     void saveMessage(convId, "user", userMessageContent);
 
+    const isStillActive = () => activeConversationIdRef.current === convId;
+
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    const assistantMessageId = createMessageId();
+    let searchMetadata: SearchMetadataHeader | undefined = undefined;
+    let searchUsed = false;
+    let enhancedPrompt = "";
+    let enhancedThinking = "";
+    const streamBuffer = new HtmlStreamBuffer();
+
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
         body: JSON.stringify({
           messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
           model: selectedModel || undefined,
@@ -597,38 +866,40 @@ export function ChatExperience() {
         })
       });
 
-      const searchMetadata = decodeSearchMetadataHeader(response.headers.get("X-AIOPH-Search-Sources"));
-      const searchUsed = response.headers.get("X-AIOPH-Search-Used") === "true";
+      searchMetadata = decodeSearchMetadataHeader(response.headers.get("X-AIOPH-Search-Sources"));
+      searchUsed = response.headers.get("X-AIOPH-Search-Used") === "true";
       const promptWasEnhanced = response.headers.get("X-AIOPH-Prompt-Enhanced") === "true";
-      const enhancedPrompt = promptWasEnhanced
+      enhancedPrompt = promptWasEnhanced
         ? decodeBase64Header(response.headers.get("X-AIOPH-Enhanced-Prompt"))
         : "";
-      const enhancedThinking = decodeBase64Header(response.headers.get("X-AIOPH-Enhanced-Thinking"));
+      enhancedThinking = decodeBase64Header(response.headers.get("X-AIOPH-Enhanced-Thinking"));
 
       if (!response.ok || !response.body) {
         const errorHtml = await response.text();
-        setIsWaitingForFirstChunk(false);
+        if (isStillActive()) setIsWaitingForFirstChunk(false);
         const errContent = errorHtml || createClientErrorHtml("Request failed", `HTTP ${response.status}`);
-        setMessages((cur) => [...cur, {
-          id: createMessageId(), role: "assistant", content: errContent,
-          createdAt: new Date().toISOString(), sources: searchMetadata?.sources, searchUsed
-        }]);
+        if (isStillActive()) {
+          setMessages((cur) => [...cur, {
+            id: assistantMessageId, role: "assistant", content: errContent,
+            createdAt: new Date().toISOString(), sources: searchMetadata?.sources, searchUsed
+          }]);
+        }
         void saveMessage(convId, "assistant", errContent, searchMetadata?.sources, searchUsed);
         return;
       }
 
-      const assistantMessageId = createMessageId();
-      const streamBuffer = new HtmlStreamBuffer();
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
-      setIsEnhancingPrompt(false);
-      setStreamingMessage({
-        id: assistantMessageId, role: "assistant", content: "",
-        createdAt: new Date().toISOString(), sources: searchMetadata?.sources, searchUsed,
-        enhancedPrompt: enhancedPrompt || undefined,
-        enhancedThinking: enhancedThinking || undefined
-      });
+      if (isStillActive()) {
+        setIsEnhancingPrompt(false);
+        setStreamingMessage({
+          id: assistantMessageId, role: "assistant", content: "",
+          createdAt: new Date().toISOString(), sources: searchMetadata?.sources, searchUsed,
+          enhancedPrompt: enhancedPrompt || undefined,
+          enhancedThinking: enhancedThinking || undefined
+        });
+      }
 
       let hasReceivedContent = false;
 
@@ -637,22 +908,26 @@ export function ChatExperience() {
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
         const renderableHtml = streamBuffer.push(chunk);
-        if (!hasReceivedContent && renderableHtml.trim().length > 0) {
-          hasReceivedContent = true;
-          setIsWaitingForFirstChunk(false);
+        if (isStillActive()) {
+          if (!hasReceivedContent && renderableHtml.trim().length > 0) {
+            hasReceivedContent = true;
+            setIsWaitingForFirstChunk(false);
+          }
+          setStreamingMessage((cur) => cur ? { ...cur, content: renderableHtml } : cur);
         }
-        setStreamingMessage((cur) => cur ? { ...cur, content: renderableHtml } : cur);
       }
 
       const finalHtml = streamBuffer.flush().trim() || createClientErrorHtml("Empty response", "LM Studio returned an empty response.");
-      setMessages((cur) => [...cur, {
-        id: assistantMessageId, role: "assistant", content: finalHtml,
-        createdAt: new Date().toISOString(), sources: searchMetadata?.sources, searchUsed,
-        enhancedPrompt: enhancedPrompt || undefined,
-        enhancedThinking: enhancedThinking || undefined
-      }]);
-      setStreamingMessage(undefined);
-      setIsWaitingForFirstChunk(false);
+      if (isStillActive()) {
+        setMessages((cur) => [...cur, {
+          id: assistantMessageId, role: "assistant", content: finalHtml,
+          createdAt: new Date().toISOString(), sources: searchMetadata?.sources, searchUsed,
+          enhancedPrompt: enhancedPrompt || undefined,
+          enhancedThinking: enhancedThinking || undefined
+        }]);
+        setStreamingMessage(undefined);
+        setIsWaitingForFirstChunk(false);
+      }
 
       // Save assistant message to DB
       void saveMessage(convId, "assistant", finalHtml, searchMetadata?.sources, searchUsed);
@@ -668,24 +943,61 @@ export function ChatExperience() {
         } catch { /* silent */ }
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unable to send message";
-      setStreamingMessage(undefined);
-      setIsWaitingForFirstChunk(false);
-      setIsEnhancingPrompt(false);
-      const errContent = createClientErrorHtml("Client request failed", errorMessage);
-      setMessages((cur) => [...cur, {
-        id: createMessageId(), role: "assistant", content: errContent, createdAt: new Date().toISOString()
-      }]);
-      void saveMessage(convId, "assistant", errContent);
+      const isAbort = (error as { name?: string })?.name === "AbortError";
+      if (isAbort) {
+        // Finalize generating whatever we have so far
+        const finalHtml = streamBuffer.flush().trim();
+        const displayHtml = finalHtml || "<p><em>Generation stopped by user.</em></p>";
+        if (isStillActive()) {
+          setMessages((cur) => [...cur, {
+            id: assistantMessageId, role: "assistant",
+            content: displayHtml,
+            createdAt: new Date().toISOString(), sources: searchMetadata?.sources, searchUsed,
+            enhancedPrompt: enhancedPrompt || undefined,
+            enhancedThinking: enhancedThinking || undefined
+          }]);
+          setStreamingMessage(undefined);
+          setIsWaitingForFirstChunk(false);
+          setIsEnhancingPrompt(false);
+        }
+        void saveMessage(convId, "assistant", displayHtml, searchMetadata?.sources, searchUsed);
+      } else {
+        const errorMessage = error instanceof Error ? error.message : "Unable to send message";
+        if (isStillActive()) {
+          setStreamingMessage(undefined);
+          setIsWaitingForFirstChunk(false);
+          setIsEnhancingPrompt(false);
+        }
+        const errContent = createClientErrorHtml("Client request failed", errorMessage);
+        if (isStillActive()) {
+          setMessages((cur) => [...cur, {
+            id: createMessageId(), role: "assistant", content: errContent, createdAt: new Date().toISOString()
+          }]);
+        }
+        void saveMessage(convId, "assistant", errContent);
+      }
     } finally {
-      setIsSending(false);
+      abortControllerRef.current = null;
+      if (isStillActive()) {
+        setIsSending(false);
+      }
     }
   }
+
+  // Queue orchestrator effect
+  useEffect(() => {
+    if (!isSending && promptQueue.length > 0) {
+      const nextItem = promptQueue[0];
+      setPromptQueue((prev) => prev.slice(1));
+      void sendMessage(nextItem.prompt, nextItem.images, nextItem.files, nextItem.links);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSending, promptQueue]);
 
   const handleScroll = useCallback(() => {
     const el = chatBodyRef.current;
     if (!el || !activeConversationId || isRestoringScrollRef.current) return;
-    sessionStorage.setItem(`aioph_scroll_${activeConversationId}`, String(el.scrollTop));
+    localStorage.setItem(`aioph_scroll_${activeConversationId}`, String(el.scrollTop));
   }, [activeConversationId]);
 
   function startNewChat(): void {
@@ -693,7 +1005,7 @@ export function ChatExperience() {
     setActiveConversationId(null);
     setIsWaitingForFirstChunk(false);
     if (typeof window !== "undefined") {
-      sessionStorage.removeItem("aioph_active_conversation_id");
+      localStorage.removeItem("aioph_active_conversation_id");
     }
     if (typeof window !== "undefined" && window.innerWidth < 768) {
       setIsHistoryOpen(false);
@@ -727,11 +1039,13 @@ export function ChatExperience() {
       <div className={`history-panel${isHistoryOpen ? " open" : ""}`}>
         <div className="history-header">
           <span className="history-title">HISTORY</span>
-          <button className="header-button" type="button" onClick={() => setIsHistoryOpen(false)}>
-            <X size={16} />
-          </button>
         </div>
-        <button className="history-new-btn" type="button" onClick={startNewChat}>
+        <button
+          className="history-new-btn"
+          type="button"
+          onClick={startNewChat}
+          disabled={isSending}
+        >
           <Plus size={14} />
           <span>New Chat</span>
         </button>
@@ -747,7 +1061,8 @@ export function ChatExperience() {
                 <button
                   type="button"
                   className="history-item-btn"
-                  onClick={() => void loadConversation(conv.id)}
+                  onClick={() => { if (!isSending) void loadConversation(conv.id); }}
+                  disabled={isSending}
                 >
                   <MessageSquare size={14} />
                   <span>{conv.title}</span>
@@ -755,8 +1070,9 @@ export function ChatExperience() {
                 <button
                   type="button"
                   className="history-item-delete"
-                  onClick={(e) => { e.stopPropagation(); void deleteConv(conv.id); }}
+                  onClick={(e) => { e.stopPropagation(); if (!isSending) void deleteConv(conv.id); }}
                   aria-label="Delete"
+                  disabled={isSending}
                 >
                   <Trash2 size={12} />
                 </button>
@@ -808,7 +1124,7 @@ export function ChatExperience() {
                   {message.role === "user" ? (
                     <div className="user-message-container">
                       {(() => {
-                        const { text, imageUrls } = parseUserMessageContent(message.content);
+                        const { text, imageUrls, files, links } = parseUserMessageContent(message.content);
                         return (
                           <>
                             {imageUrls.length > 0 && (
@@ -816,6 +1132,20 @@ export function ChatExperience() {
                                 {imageUrls.map((url, i) => (
                                   // eslint-disable-next-line @next/next/no-img-element
                                   <img key={i} src={url} alt="User upload" className="user-message-image" />
+                                ))}
+                              </div>
+                            )}
+                            {files.length > 0 && (
+                              <div className="user-message-attachments user-message-files">
+                                {files.map((file, i) => (
+                                  <UserFileCard key={i} file={file} />
+                                ))}
+                              </div>
+                            )}
+                            {links.length > 0 && (
+                              <div className="user-message-attachments user-message-links">
+                                {links.map((link, i) => (
+                                  <UserLinkCard key={i} link={link} />
                                 ))}
                               </div>
                             )}
@@ -899,15 +1229,16 @@ export function ChatExperience() {
         {/* ── Composer ── */}
         <div className="composer">
           <div className="composer-container">
-            {attachedImages.length > 0 && (
-              <div className="image-previews">
+            {(attachedImages.length > 0 || attachedFiles.length > 0 || attachedLinks.length > 0) && (
+              <div className="composer-attachments">
+                {/* Image Previews */}
                 {attachedImages.map((img, index) => (
-                  <div key={index} className="image-preview-item">
+                  <div key={`img-${index}`} className="attachment-preview-item image-preview">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={img} alt="Preview" />
                     <button
                       type="button"
-                      className="remove-image-btn"
+                      className="remove-attachment-btn"
                       onClick={() => removeAttachedImage(index)}
                       aria-label="Remove image"
                     >
@@ -915,26 +1246,171 @@ export function ChatExperience() {
                     </button>
                   </div>
                 ))}
+
+                {/* File Previews */}
+                {attachedFiles.map((file, index) => (
+                  <div key={`file-${index}`} className="attachment-preview-item file-preview">
+                    <FileIcon size={14} />
+                    <span className="attachment-name" title={file.name}>{file.name}</span>
+                    <button
+                      type="button"
+                      className="remove-attachment-btn"
+                      onClick={() => removeAttachedFile(index)}
+                      aria-label="Remove file"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+
+                {/* Link Previews */}
+                {attachedLinks.map((link, index) => (
+                  <div key={`link-${index}`} className="attachment-preview-item link-preview">
+                    <Globe size={14} />
+                    <span className="attachment-name" title={link.url}>{link.title || link.url}</span>
+                    <button
+                      type="button"
+                      className="remove-attachment-btn"
+                      onClick={() => removeAttachedLink(index)}
+                      aria-label="Remove link"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
-            <form className="composer-inner" onSubmit={(e) => { e.preventDefault(); void sendMessage(); }}>
+
+            {isLinkInputOpen && (
+              <div className="link-input-overlay">
+                <Globe size={14} />
+                <input
+                  type="url"
+                  placeholder="Paste URL (e.g. https://example.com)..."
+                  value={linkInputUrl}
+                  onChange={(e) => setLinkInputUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void handleLinkSubmit();
+                    }
+                  }}
+                  disabled={isScrapingLink}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  className="link-input-submit"
+                  onClick={() => void handleLinkSubmit()}
+                  disabled={isScrapingLink}
+                >
+                  {isScrapingLink ? "Scraping..." : "Add"}
+                </button>
+                <button
+                  type="button"
+                  className="link-input-cancel"
+                  onClick={() => {
+                    setIsLinkInputOpen(false);
+                    setLinkInputUrl("");
+                  }}
+                  disabled={isScrapingLink}
+                  aria-label="Cancel"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
+            {promptQueue.length > 0 && (
+              <div className="prompt-queue-container">
+                <div className="prompt-queue-header">
+                  <span className="prompt-queue-title">QUEUED PROMPTS</span>
+                  <span className="prompt-queue-count">{promptQueue.length} pending</span>
+                </div>
+                <div className="prompt-queue-list">
+                  {promptQueue.map((item, idx) => (
+                    <div key={idx} className="prompt-queue-item">
+                      <span className="prompt-queue-item-text">
+                        {idx + 1}. {truncateTitle(item.prompt, 50) || "Sent an attachment"}
+                      </span>
+                      <button
+                        type="button"
+                        className="prompt-queue-item-remove"
+                        onClick={() => removeQueuedPrompt(idx)}
+                        aria-label="Remove from queue"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            <form className={`composer-inner${isSending ? " has-stop-button" : ""}`} onSubmit={(e) => { e.preventDefault(); void sendMessage(); }}>
               <input
                 type="file"
-                ref={fileInputRef}
+                ref={imageInputRef}
                 style={{ display: "none" }}
                 accept="image/*"
                 multiple
                 onChange={(e) => handleImageUpload(e.target.files)}
               />
-              <button
-                type="button"
-                className="attach-button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isSending}
-                aria-label="Attach image"
-              >
-                <Plus size={16} />
-              </button>
+              <input
+                type="file"
+                ref={fileInputRef}
+                style={{ display: "none" }}
+                accept=".txt,.md,.js,.ts,.tsx,.jsx,.html,.css,.json,.py,.java,.c,.cpp,.h,.cs,.go,.rs,.sh,.bat,.yaml,.yml,.xml,.csv,.log,.ini,.conf,.env"
+                multiple
+                onChange={(e) => handleFileUpload(e.target.files)}
+              />
+              <div className="attach-menu-wrapper">
+                <button
+                  type="button"
+                  className={`attach-button${isAttachMenuOpen ? " active" : ""}`}
+                  onClick={() => setIsAttachMenuOpen(!isAttachMenuOpen)}
+                  disabled={isSending}
+                  aria-label="Attach content"
+                >
+                  <Plus size={16} />
+                </button>
+                {isAttachMenuOpen && (
+                  <>
+                    <div className="attach-menu-backdrop" onClick={() => setIsAttachMenuOpen(false)} />
+                    <div className="attach-dropdown-menu">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAttachMenuOpen(false);
+                          imageInputRef.current?.click();
+                        }}
+                      >
+                        <ImageIcon size={14} />
+                        <span>Attach Image</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAttachMenuOpen(false);
+                          fileInputRef.current?.click();
+                        }}
+                      >
+                        <FileIcon size={14} />
+                        <span>Attach File</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsAttachMenuOpen(false);
+                          setIsLinkInputOpen(true);
+                        }}
+                      >
+                        <Globe size={14} />
+                        <span>Attach Link</span>
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
               <textarea
                 ref={textareaRef}
                 value={inputValue}
@@ -943,15 +1419,24 @@ export function ChatExperience() {
                 onPaste={handlePaste}
                 placeholder="Type your question..."
                 rows={1}
-                disabled={isSending}
               />
+              {isSending && (
+                <button
+                  type="button"
+                  className="stop-button"
+                  onClick={stopGeneration}
+                  aria-label="Stop generating"
+                >
+                  <Square size={14} fill="currentColor" />
+                </button>
+              )}
               <button
                 className="send-button"
                 type="submit"
-                disabled={isSending || (!inputValue.trim() && attachedImages.length === 0)}
-                aria-label="Send"
+                disabled={!inputValue.trim() && attachedImages.length === 0 && attachedFiles.length === 0 && attachedLinks.length === 0}
+                aria-label={isSending ? "Queue prompt" : "Send"}
               >
-                <Send size={14} />
+                {isSending ? <Plus size={14} /> : <Send size={14} />}
               </button>
             </form>
             <div className="composer-toolbar">

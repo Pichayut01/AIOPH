@@ -9,8 +9,7 @@ import {
   fetchLmStudioModels
 } from "@/lib/llm/lm-studio-client";
 import { buildHtmlAssistantSystemPrompt } from "@/lib/llm/system-prompt";
-import { enhanceUserPrompt } from "@/lib/llm/prompt-enhancer";
-import { generateSmartSearchQuery } from "@/lib/llm/smart-search-planner";
+import { coordinateQuery } from "@/lib/llm/query-coordinator";
 import { searchWebForEvidence } from "@/lib/search/search-service";
 import type { SearchEvidence } from "@/lib/search/search-types";
 
@@ -87,6 +86,82 @@ function encodeTextHeader(text: string): string {
   return Buffer.from(text, "utf8").toString("base64url");
 }
 
+function flattenMessageForLlm(message: { role: string; content: string | ContentPart[] }): { role: string; content: string | ContentPart[] } {
+  if (message.role !== "user") return message;
+
+  let parts: ContentPart[] = [];
+  if (typeof message.content === "string") {
+    const trimmed = message.content.trim();
+    if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+      try {
+        parts = JSON.parse(trimmed);
+      } catch {
+        return message;
+      }
+    } else {
+      return message;
+    }
+  } else if (Array.isArray(message.content)) {
+    parts = message.content;
+  } else {
+    return message;
+  }
+
+  let text = "";
+  const imageUrlParts: ContentPart[] = [];
+  const files: Array<{ name: string; size: number; content: string }> = [];
+  const links: Array<{ url: string; title: string; content: string }> = [];
+
+  for (const part of parts) {
+    if (part.type === "text" && part.text) {
+      text += (text ? "\n" : "") + part.text;
+    } else if (part.type === "image_url" && part.image_url) {
+      imageUrlParts.push(part);
+    } else if (part.type === "file" && part.file) {
+      files.push(part.file);
+    } else if (part.type === "link" && part.link) {
+      links.push(part.link);
+    }
+  }
+
+  let contextExtensions = "";
+  if (files.length > 0) {
+    contextExtensions += "\n\n=== Attached Files ===\n" + files.map(file => {
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      const langMap: Record<string, string> = {
+        js: "javascript", jsx: "javascript", ts: "typescript", tsx: "typescript",
+        py: "python", html: "html", css: "css", json: "json", md: "markdown",
+        csv: "csv", xml: "xml", yml: "yaml", yaml: "yaml", sh: "bash"
+      };
+      const lang = langMap[ext] || "";
+      return `[File: ${file.name} (${file.size} bytes)]\n\`\`\`${lang}\n${file.content}\n\`\`\``;
+    }).join("\n\n");
+  }
+
+  if (links.length > 0) {
+    contextExtensions += "\n\n=== Attached Links ===\n" + links.map(link => {
+      return `[Link: ${link.title} (${link.url})]\nWebpage Scraped Text Content:\n${link.content}`;
+    }).join("\n\n");
+  }
+
+  const flattenedText = text + contextExtensions;
+
+  if (imageUrlParts.length > 0) {
+    return {
+      role: message.role,
+      content: [
+        { type: "text", text: flattenedText },
+        ...imageUrlParts
+      ]
+    };
+  } else {
+    return {
+      role: message.role,
+      content: flattenedText
+    };
+  }
+}
+
 export async function POST(request: Request): Promise<Response> {
   let requestPayload: unknown;
 
@@ -101,7 +176,8 @@ export async function POST(request: Request): Promise<Response> {
     return createHtmlErrorResponse("Invalid request", parsedRequest.error.issues[0]?.message ?? "The chat payload is invalid.", 400);
   }
 
-  const latestUserMessage = getLatestUserMessage(parsedRequest.data.messages);
+  const messagesInput = parsedRequest.data.messages.map(flattenMessageForLlm);
+  const latestUserMessage = getLatestUserMessage(messagesInput);
   const searchMode: SearchMode = parsedRequest.data.searchMode ?? "auto";
 
   let model: string;
@@ -113,7 +189,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   if (parsedRequest.data.deepResearch) {
-    const rawMessages = parsedRequest.data.messages.slice(-6);
+    const rawMessages = messagesInput.slice(-6);
     const processedMessages = rawMessages.map((message) => {
       if (typeof message.content === "string") {
         const trimmed = message.content.trim();
@@ -150,30 +226,19 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  // ── Parallel Pass: Enhance prompt & Generate Smart Search Query ──
-  const searchPromise = (searchMode === "auto" || searchMode === "on") 
-    ? generateSmartSearchQuery(latestUserMessage, model)
-    : Promise.resolve(null);
-  
-  const enhancePromise = enhanceUserPrompt(latestUserMessage, model);
-
-  const [searchQuery, { enhancedPrompt, thinking: enhancedThinking }] = await Promise.all([
-    searchPromise,
-    enhancePromise
-  ]);
+  // ── Single Pass: Coordinate Query (Decide search, generate query, and enhance prompt) ──
+  const { shouldSearch, searchQuery, enhancedPrompt, thinking: enhancedThinking } = 
+    await coordinateQuery(latestUserMessage, model, searchMode);
 
   const wasPromptEnhanced = enhancedPrompt !== latestUserMessage;
   let searchEvidence: SearchEvidence | undefined;
 
-  // For "on" mode, fallback to original message if LLM generated null
-  const finalSearchQuery = searchQuery || (searchMode === "on" ? latestUserMessage : null);
-  
-  if (finalSearchQuery) {
-    searchEvidence = await searchWebForEvidence(finalSearchQuery);
+  if (shouldSearch && searchQuery) {
+    searchEvidence = await searchWebForEvidence(searchQuery);
   }
 
   // Build the messages array, replacing the last user message with the enhanced version
-  const rawMessages = parsedRequest.data.messages.slice(-6);
+  const rawMessages = messagesInput.slice(-6);
   const processedMessages = rawMessages.map((message, index) => {
     const isLastUserMessage =
       message.role === "user" &&
