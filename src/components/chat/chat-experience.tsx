@@ -2,11 +2,13 @@
 
 import {
   Activity,
+  Brain,
   ChevronDown,
   ChevronUp,
   Code2,
   Copy,
   Check,
+  Database,
   Download,
   ExternalLink,
   File as FileIcon,
@@ -44,6 +46,7 @@ interface InterfaceMessage {
   searchUsed?: boolean;
   enhancedPrompt?: string;
   enhancedThinking?: string;
+  memorySaved?: boolean;
 }
 
 interface SourceMetadata {
@@ -95,6 +98,14 @@ interface AttachedLink {
 interface ConversationSummary {
   id: string;
   title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface MemoryItem {
+  id: string;
+  memory_text: string;
+  category: string;
   created_at: string;
   updated_at: string;
 }
@@ -230,7 +241,7 @@ function SourceChips({ sources }: { sources: SourceMetadata[] }) {
   );
 }
 
-function MessageCopyButton({ html }: { html: string }) {
+function MessageCopyButton({ html, memorySaved }: { html: string; memorySaved?: boolean }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -246,6 +257,12 @@ function MessageCopyButton({ html }: { html: string }) {
 
   return (
     <div className="message-actions">
+      {memorySaved && (
+        <div className="message-memory-badge" title="Saved to Long-Term Memory & Chat RAG">
+          <Database size={11} />
+          <span>Memory Saved</span>
+        </div>
+      )}
       <button className={`message-copy-btn ${copied ? "copied" : ""}`} onClick={handleCopy} aria-label="Copy message">
         {copied ? <Check size={14} /> : <Copy size={14} />}
         <span>{copied ? "Copied" : "Copy"}</span>
@@ -401,6 +418,10 @@ export function ChatExperience() {
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [deepResearchMode, setDeepResearchMode] = useState(false);
 
+  // Memory state
+  const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [isMemoryExpanded, setIsMemoryExpanded] = useState(false);
+
   // Settings state
   const [selectedModel, setSelectedModel] = useState("");
   const [availableModels, setAvailableModels] = useState<Array<{ id: string }>>([]);
@@ -532,13 +553,14 @@ export function ChatExperience() {
       const res = await fetch(`/api/conversations/${id}`, { cache: "no-store" });
       const data = await res.json();
       if (data.ok) {
-        const msgs: InterfaceMessage[] = data.conversation.messages.map((m: { id: string; role: string; content: string; sources_json: string | null; search_used: number; created_at: string }) => ({
+        const msgs: InterfaceMessage[] = data.conversation.messages.map((m: { id: string; role: string; content: string; sources_json: string | null; search_used: number; created_at: string; memory_saved?: number }) => ({
           id: m.id,
           role: m.role as InterfaceRole,
           content: m.content,
           createdAt: m.created_at,
           sources: m.sources_json ? JSON.parse(m.sources_json) : undefined,
-          searchUsed: m.search_used === 1
+          searchUsed: m.search_used === 1,
+          memorySaved: m.memory_saved === 1
         }));
         
         isRestoringScrollRef.current = true;
@@ -981,6 +1003,22 @@ export function ChatExperience() {
       if (isStillActive()) {
         setIsSending(false);
       }
+
+      // Background memory extraction, summarization, and RAG indexing (fire-and-forget)
+      if (prompt && prompt.length >= 10 && selectedModel) {
+        fetch("/api/memory/extract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: prompt, model: selectedModel, conversationId: convId })
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data.ok && isStillActive()) {
+              loadConversation(convId, false);
+            }
+          })
+          .catch(() => { /* silent background task */ });
+      }
     }
   }
 
@@ -1150,6 +1188,14 @@ export function ChatExperience() {
                               </div>
                             )}
                             {text && <div className="user-message">{text}</div>}
+                            {message.memorySaved && (
+                              <div className="user-message-actions">
+                                <div className="message-memory-badge" title="Saved to Long-Term Memory & Chat RAG">
+                                  <Database size={10} />
+                                  <span>Memory Saved</span>
+                                </div>
+                              </div>
+                            )}
                           </>
                         );
                       })()}
@@ -1164,7 +1210,7 @@ export function ChatExperience() {
                       )}
                       <HtmlMessage html={message.content} />
                       <SourceChips sources={message.sources ?? []} />
-                      <MessageCopyButton html={message.content} />
+                      <MessageCopyButton html={message.content} memorySaved={message.memorySaved} />
                     </div>
                   )}
                 </article>
@@ -1522,6 +1568,86 @@ export function ChatExperience() {
               <p className="microcopy" style={{ color: "var(--color-text-muted)" }}>Deep Research handles searches automatically.</p>
             ) : (
               <p className="microcopy">Auto searches when questions mention current events.</p>
+            )}
+          </section>
+
+          <section className="control-section">
+            <div className="section-heading">
+              <Brain size={13} style={{ marginRight: 6, flexShrink: 0 }} />
+              MEMORY
+              <button
+                type="button"
+                onClick={() => {
+                  fetch("/api/memory", { cache: "no-store" })
+                    .then(r => r.json())
+                    .then(d => { if (d.ok) setMemories(d.memories); })
+                    .catch(() => { /* silent */ });
+                  setIsMemoryExpanded(!isMemoryExpanded);
+                }}
+                style={{ marginLeft: "auto", background: "none", border: "none", color: "inherit", cursor: "pointer", padding: 4 }}
+                title={isMemoryExpanded ? "Collapse" : "Expand"}
+              >
+                {isMemoryExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </button>
+            </div>
+            <p className="microcopy">
+              AI remembers facts about you across chats. {memories.length > 0 ? `${memories.length} memories stored.` : "No memories yet."}
+            </p>
+            {isMemoryExpanded && (
+              <div className="memory-list">
+                {memories.length === 0 ? (
+                  <p className="memory-empty">No memories stored yet. Chat naturally and AIOPH will learn about you.</p>
+                ) : (
+                  <>
+                    {memories.map((mem) => (
+                      <div key={mem.id} className="memory-card">
+                        <div className="memory-card-header">
+                          <span className="memory-category-badge">{mem.category}</span>
+                          <button
+                            type="button"
+                            className="memory-delete-btn"
+                            onClick={() => {
+                              fetch("/api/memory", {
+                                method: "DELETE",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ id: mem.id })
+                              })
+                                .then(r => r.json())
+                                .then(d => {
+                                  if (d.ok) setMemories(prev => prev.filter(m => m.id !== mem.id));
+                                })
+                                .catch(() => { /* silent */ });
+                            }}
+                            aria-label="Delete memory"
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                        <p className="memory-card-text">{mem.memory_text}</p>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      className="utility-button memory-clear-all"
+                      onClick={() => {
+                        if (confirm("Delete all memories? This cannot be undone.")) {
+                          fetch("/api/memory", {
+                            method: "DELETE",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ all: true })
+                          })
+                            .then(r => r.json())
+                            .then(d => { if (d.ok) setMemories([]); })
+                            .catch(() => { /* silent */ });
+                        }
+                      }}
+                    >
+                      <Trash2 size={11} />
+                      <span>Clear All Memories</span>
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </section>
 

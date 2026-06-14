@@ -33,8 +33,12 @@ function formatSearchEvidence(searchEvidence?: SearchEvidence): string {
   ].join("\n\n");
 }
 
-export function buildHtmlAssistantSystemPrompt(searchEvidence?: SearchEvidence): string {
+export function buildHtmlAssistantSystemPrompt(searchEvidence?: SearchEvidence, memoryContext?: string): string {
   const currentDate = new Date().toISOString().slice(0, 10);
+
+  const memoryBlock = memoryContext
+    ? `\n\n${memoryContext}\n`
+    : "";
 
   return `
 You are AIOPH, a local-first web research assistant running through LM Studio.
@@ -107,7 +111,7 @@ Here is a concrete example of the expected output format using premium layout st
 
 Visual direction:
 Use a dark, industrial interface tone aligned with the host design. Prefer direct sections, compact tables, short headings, and high information density. Do not rely on decorative colors. Use the host CSS classes and variables rather than inline hex colors.
-
+${memoryBlock}
 Web evidence for this turn:
 ${formatSearchEvidence(searchEvidence)}
 `.trim();

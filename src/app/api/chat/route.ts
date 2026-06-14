@@ -12,6 +12,7 @@ import { buildHtmlAssistantSystemPrompt } from "@/lib/llm/system-prompt";
 import { coordinateQuery } from "@/lib/llm/query-coordinator";
 import { searchWebForEvidence } from "@/lib/search/search-service";
 import type { SearchEvidence } from "@/lib/search/search-types";
+import { buildMemoryContextBlock } from "@/lib/memory/memory-context";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -301,10 +302,13 @@ export async function POST(request: Request): Promise<Response> {
     return message;
   }) as ChatMessage[];
 
+  // Fetch long-term memory context (fast SQLite SELECT + vector search)
+  const memoryContext = await buildMemoryContextBlock(latestUserMessage, model);
+
   const messages: ChatMessage[] = [
     {
       role: "system",
-      content: buildHtmlAssistantSystemPrompt(searchEvidence)
+      content: buildHtmlAssistantSystemPrompt(searchEvidence, memoryContext || undefined)
     },
     ...processedMessages
   ];
